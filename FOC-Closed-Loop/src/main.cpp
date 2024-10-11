@@ -19,6 +19,10 @@ const int Motor_phase_A = 9;  // Pin for driver input of phase A
 const int Motor_phase_B = 10; // Pin for driver input of phase B
 const int Motor_phase_C = 11; // Pin for driver input of phase C
 
+// PID parameters
+const float Kp = 0.6;
+const float Kd = 0.1;
+
 // Variables used in the code
 int16_t SINE_A = 0;	   // Initial angle value of the phase A
 int16_t SINE_B = 120;  // Initial angle value of the phase B
@@ -35,8 +39,14 @@ uint16_t encoder_read_r = 0;
 int64_t field_abs_angle = 0;	// The desired absolute angle of the rotor, executed by applying that direction of magnetic field
 int64_t encoder_abs_read = 0;	// The accumulated read value from the encoder
 int64_t encoder_abs_angle = 0;	// The absolute angle of the encoder, converted from encoder_abs_read
+int64_t goal_abs_angle = 0;
+
+int64_t field_offset = 0;	// The misalignment angle between encoder and coil, which can be calculated by align_encoder_and_coils()
+
+uint32_t time_r = 0;
 
 // Functions used in the code
+void align_encoder_and_coils();
 void apply_magnetic_field();
 void get_angle();
 
@@ -58,11 +68,21 @@ void setup()
 	pinMode(Motor_phase_C, OUTPUT);
 	pinMode(Enable_Pin, OUTPUT);
 	digitalWrite(Enable_Pin, HIGH);
+
+	align_encoder_and_coils();
 }
 
 void loop()
 {
 	get_angle();
+
+	int16_t error = constrain(encoder_abs_angle - goal_abs_angle, (int64_t)-2000, (int64_t)2000);
+	uint16_t time_elapsed = millis() - time_r;
+	time_r += time_elapsed;
+	int16_t torque_angle = - error * Kp;	// The angle between the actual rotor angle and the applied field angle
+	torque_angle = constrain(torque_angle, -13, 13);	// 360/7/4~=12
+	field_abs_angle = encoder_abs_angle + torque_angle;
+
 	apply_magnetic_field(); // Function for moving the motor
 	
 	// // Read the potentiometer 10 times for better values
@@ -78,12 +98,12 @@ void loop()
 	// pot_angle = (((float)pot_read) * (360 * poles) / 1024);
 	// SINE_A = pot_angle; // Pass the degree information to the SINE_A variable
 
-	field_abs_angle = 720 - millis() / 10;
+	// field_abs_angle = 720 - millis() / 10;
 }
 
 void apply_magnetic_field()
 {
-	SINE_A = (field_abs_angle % 360) * 7;
+	SINE_A = ((field_abs_angle - field_offset) % 360) * 7;
 	SINE_B = SINE_A + 120; // We have a 120 phase difference betweeen phase A and B
 	SINE_C = SINE_B + 120; // We have a 120 phase difference betweeen phase B and C
 
@@ -134,4 +154,24 @@ void get_angle()
 	Serial.print(">encoder_abs_angle:");
 	Serial.println(long(encoder_abs_angle));
 	#endif
+}
+
+void align_encoder_and_coils(){
+	#ifdef DBG
+	Serial.println("Aligning encoder and coils, do not touch the motor...");
+	#endif
+	field_abs_angle = 0;
+	apply_magnetic_field();
+	delay(500);
+	uint32_t encoder_angle_avg = 0;
+	for(int i = 0; i < 20; ++ i)
+	{
+		get_angle();
+		encoder_angle_avg += encoder_read;
+		delay(20);
+	}
+	encoder_angle_avg *= 360;
+	encoder_angle_avg /= 4096.0;
+	encoder_angle_avg /= 20.0;
+	field_offset = encoder_angle_avg;
 }

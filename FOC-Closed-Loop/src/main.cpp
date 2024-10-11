@@ -24,9 +24,9 @@ const float Kp = 0.6;
 const float Kd = 0.1;
 
 // Variables used in the code
-int16_t SINE_A = 0;	   // Initial angle value of the phase A
-int16_t SINE_B = 120;  // Initial angle value of the phase B
-int16_t SINE_C = 240;  // Initial angle value of the phase C
+float SINE_A = 0;	   // Initial angle value of the phase A
+float SINE_B = 120;  // Initial angle value of the phase B
+float SINE_C = 240;  // Initial angle value of the phase C
 int poles = 10;		   /*Amount of poles of the motor (change this value if the motor is not
 					   getting to a full rotation. For example, my motor has 28 poles but I had
 					   to add "11" in order to make a full rotation*/
@@ -36,12 +36,12 @@ uint16_t pot_angle;	   // Variable to store setpoint angle.
 uint16_t encoder_read = 0;
 uint16_t encoder_read_r = 0;
 
-int64_t field_abs_angle = 0;	// The desired absolute angle of the rotor, executed by applying that direction of magnetic field
-int64_t encoder_abs_read = 0;	// The accumulated read value from the encoder
-int64_t encoder_abs_angle = 0;	// The absolute angle of the encoder, converted from encoder_abs_read
-int64_t goal_abs_angle = 0;
+double field_abs_angle = 0;	// The desired absolute angle of the rotor, executed by applying that direction of magnetic field
+double encoder_abs_read = 0;	// The accumulated read value from the encoder
+double encoder_abs_angle = 0;	// The absolute angle of the encoder, converted from encoder_abs_read
+double goal_abs_angle = 0;
 
-int64_t field_offset = 0;	// The misalignment angle between encoder and coil, which can be calculated by align_encoder_and_coils()
+double field_offset = 0;	// The misalignment angle between encoder and coil, which can be calculated by align_encoder_and_coils()
 
 uint32_t time_r = 0;
 
@@ -76,10 +76,10 @@ void loop()
 {
 	get_angle();
 
-	int16_t error = constrain(encoder_abs_angle - goal_abs_angle, (int64_t)-2000, (int64_t)2000);
+	double error = constrain(encoder_abs_angle - goal_abs_angle, -2000, 2000);
 	uint16_t time_elapsed = millis() - time_r;
 	time_r += time_elapsed;
-	int16_t torque_angle = - error * Kp;	// The angle between the actual rotor angle and the applied field angle
+	double torque_angle = - error * Kp;	// The angle between the actual rotor angle and the applied field angle
 	torque_angle = constrain(torque_angle, -13, 13);	// 360/7/4~=12
 	field_abs_angle = encoder_abs_angle + torque_angle;
 
@@ -103,14 +103,15 @@ void loop()
 
 void apply_magnetic_field()
 {
-	SINE_A = ((field_abs_angle - field_offset) % 360) * 7;
+	double field_abs_calibrated = (field_abs_angle - field_offset) - (int)(field_abs_angle - field_offset) / 360;
+	SINE_A = field_abs_calibrated * 7;
 	SINE_B = SINE_A + 120; // We have a 120 phase difference betweeen phase A and B
 	SINE_C = SINE_B + 120; // We have a 120 phase difference betweeen phase B and C
 
 	// Range calculation of Sine Signal
-	SINE_A = SINE_A % 360; // Keep the values between 0 and 359
-	SINE_B = SINE_B % 360; // Keep the values between 0 and 359
-	SINE_C = SINE_C % 360; // Keep the values between 0 and 359
+	SINE_A = SINE_A - ((int)SINE_A / 360) * 360; 	// Keep the values between 0 and 359
+	SINE_B = SINE_B - ((int)SINE_A / 360) * 360; 	// Keep the values between 0 and 359
+	SINE_C = SINE_C - ((int)SINE_A / 360) * 360; 	// Keep the values between 0 and 359
 
 	// Calculate the PWM values for creating a sine signal (SPWM)
 	int SINE_A_PWM = sin((double)SINE_A * PI / 180) * 127.5 + 127.5; // Multiply by PI and divide by 180 in order to pass from degrees to radians
@@ -147,12 +148,13 @@ void get_angle()
 	else
 		encoder_abs_read += delta;
 	encoder_read_r = encoder_read;
-	encoder_abs_angle = 360 * (encoder_abs_read / 4096) + (encoder_abs_read % 4096) * 360.0 / 4095.0;
+	encoder_abs_angle = encoder_abs_read / 4096 * 360;
+
 	#ifdef DBG
 	Serial.print(">encoder_abs_read:");
 	Serial.println(long(encoder_abs_read));
 	Serial.print(">encoder_abs_angle:");
-	Serial.println(long(encoder_abs_angle));
+	Serial.println(encoder_abs_angle);
 	#endif
 }
 

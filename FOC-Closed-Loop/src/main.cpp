@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Wire.h>
+#include "absolute_angle.h"
 
 /* Reference:
  * https://electronoobs.com/eng_arduino_tut176.php */
@@ -21,64 +22,23 @@ const int Motor_phase_C = 11; // Pin for driver input of phase C
 // PID parameters
 const float Kp = 1;
 const float Ki = 0.01;
-const float Kd = 1;
+const float Kd = 3;
 
 // Variables used in the code
-class absolute_angle
-{
-	public:
-	long coarse = 0;	// Integer rotation
-	double fine = 0;	// Angle in this rotation
-	void set_abs_angle(double abs_angle)
-	{
-		coarse = floor_i(abs_angle) % 360;
-		fine = abs_angle - 360 * coarse;
-	}
-	double operator-(absolute_angle a)
-	{
-		return 360.0 * (coarse - a.coarse) + (fine - a.fine);
-	}
-	absolute_angle operator+(absolute_angle d)
-	{
-		absolute_angle temp;
-		temp.coarse = coarse + d.coarse;
-		temp.fine = fine + d.fine;
-		if(fine + d.fine >= 360.0)
-		{
-			++ temp.coarse;
-			temp.fine -= 360;
-		}
-		return temp;
-	}
-	absolute_angle operator+(double d)
-	{
-		absolute_angle temp;
-		temp.set_abs_angle(d);
-		temp = *this + temp;
-		return temp;
-	}
-	private:
-	long floor_i(double in)
-	{
-		long in_l = long(in);
-		return ((in_l >= 0) ? (in_l) : (in_l - 1));
-	}
-};
 
 double phase_angle = 0;
 
 uint16_t encoder_read = 0;
 uint16_t encoder_read_r = 0;
 
-// double field_abs_angle = 0;	// The desired absolute angle of the rotor, executed by applying that direction of magnetic field
-// double encoder_abs_read = 0;	// The accumulated read value from the encoder
-// double encoder_abs_angle = 0;	// The absolute angle of the encoder, converted from encoder_abs_read
-// double goal_abs_angle = 0;
 absolute_angle field_abs_angle;	// The desired absolute angle of the rotor, executed by applying that direction of magnetic field
 absolute_angle encoder_abs_read;	// The accumulated read value from the encoder
 absolute_angle encoder_abs_angle;	// The absolute angle of the encoder, converted from encoder_abs_read
-absolute_angle encoder_abs_angle_r;
+// absolute_angle encoder_abs_angle_r;
 absolute_angle goal_abs_angle;
+
+double error = 0;
+double error_r = 0;
 
 double field_offset = 0;	// The misalignment angle between encoder and coil, which can be calculated by align_encoder_and_coils()
 
@@ -120,16 +80,24 @@ void loop()
 
 	uint16_t time_elapsed = millis() - time_r;
 	time_r += time_elapsed;
-	double error = constrain(encoder_abs_angle - goal_abs_angle, -2000, 2000);
+	error = constrain(encoder_abs_angle - goal_abs_angle, -2000, 2000);
 	#ifdef DBG
 	Serial.print(">error:");
 	Serial.println(error);
 	#endif
+	// Kp term:
 	double torque_angle = - error * Kp;	// The angle between the actual rotor angle and the applied field angle
-	// error_sum += error * time_elapsed;
-	// torque_angle -= error_sum * Ki;
-	// torque_angle -= Kd * (encoder_abs_angle - encoder_abs_angle_r) / time_elapsed;
-	// encoder_abs_angle_r = encoder_abs_angle;
+	// Ki term:
+	error_sum += error * time_elapsed;
+	error_sum = constrain(error_sum, -500, 500);
+	torque_angle -= error_sum * Ki;
+	// Kd term:
+	torque_angle -= Kd * (error - error_r) / time_elapsed;
+	#ifdef DBG
+	Serial.print(">Kd terms:");
+	Serial.println(Kd * (error - error_r) / time_elapsed);
+	#endif
+	error_r = error;
 	torque_angle = constrain(torque_angle, -12.85714, 12.85714);	// 360/7/4~=12.85714
 
 	field_abs_angle = encoder_abs_angle + torque_angle;
@@ -168,16 +136,6 @@ void get_angle()
 	// The returned angle value of AS5600 is between 0 and 4095:
 	encoder_read = (Wire.read() << 8) | Wire.read();
 
-	// Accumulate the encoder read value to get the absolute angle:
-	// int16_t delta = encoder_read - encoder_read_r;
-	// if(delta > 2047)
-	// 	encoder_abs_read += delta - 4096;
-	// else if(delta < -2047)
-	// 	encoder_abs_read += delta + 4096;
-	// else
-	// 	encoder_abs_read += delta;
-	// encoder_read_r = encoder_read;
-	// encoder_abs_angle = encoder_abs_read / 4096 * 360;
 	// Accumulate the encoder read value to get the absolute angle:
 	int16_t delta = encoder_read - encoder_read_r;
 	if(delta > 2047)
